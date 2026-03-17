@@ -169,13 +169,16 @@ export async function deleteBox(id: string): Promise<void> {
 }
 
 /** Analyze images (multipart upload) */
-export async function analyzeImage(imageUris: string[]): Promise<AnalyzeResult> {
+export async function analyzeImage(imageUris: string[], externalSignal?: AbortSignal): Promise<AnalyzeResult> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), TIMEOUT);
+    if (externalSignal) {
+        externalSignal.addEventListener('abort', () => controller.abort());
+    }
 
     try {
         const formData = new FormData();
-        
+
         for (const uri of imageUris) {
             const filename = uri.split('/').pop() || 'capture.jpg';
             formData.append('images', {
@@ -199,6 +202,7 @@ export async function analyzeImage(imageUris: string[]): Promise<AnalyzeResult> 
         return json.data;
     } catch (err: any) {
         if (err.name === 'AbortError') {
+            if (externalSignal?.aborted) throw err;
             throw new Error('İstek zaman aşımına uğradı');
         }
         throw err;
@@ -208,9 +212,12 @@ export async function analyzeImage(imageUris: string[]): Promise<AnalyzeResult> 
 }
 
 /** Upload images only (no AI) */
-export async function uploadImages(imageUris: string[]): Promise<string[]> {
+export async function uploadImages(imageUris: string[], externalSignal?: AbortSignal): Promise<string[]> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), TIMEOUT);
+    if (externalSignal) {
+        externalSignal.addEventListener('abort', () => controller.abort());
+    }
 
     try {
         const formData = new FormData();
@@ -237,6 +244,7 @@ export async function uploadImages(imageUris: string[]): Promise<string[]> {
         return json.data.imageUrls;
     } catch (err: any) {
         if (err.name === 'AbortError') {
+            if (externalSignal?.aborted) throw err;
             throw new Error('İstek zaman aşımına uğradı');
         }
         throw err;

@@ -49,6 +49,12 @@ export default function CameraScreen() {
     const audio = useAIAudio();
     const cameraRef = useRef<CameraView>(null);
     const isFocused = useIsFocused();
+    const isCapturing = useRef(false);
+    const isMounted = useRef(true);
+    const abortControllerRef = useRef<AbortController | null>(null);
+    const navigationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    useEffect(() => () => { isMounted.current = false; }, []);
 
     useFocusEffect(
         useCallback(() => {
@@ -56,11 +62,14 @@ export default function CameraScreen() {
             setPhotoUris([]);
             setProcessing(false);
             setAlert({ visible: false, message: '', type: 'success' });
-            
-            // Eğer izin reddedildiyse ve sorulabilir durumdaysa otomatik tekrar sorulabilir, 
+
+            // Eğer izin reddedildiyse ve sorulabilir durumdaysa otomatik tekrar sorulabilir,
             // ama burada sadece state'i sıfırlamak yetecektir.
             return () => {
-                // Ekrandan çıkıldığında da temizleyebiliriz
+                // Ekrandan çıkıldığında devam eden istekleri iptal et
+                abortControllerRef.current?.abort();
+                abortControllerRef.current = null;
+                if (navigationTimeoutRef.current) clearTimeout(navigationTimeoutRef.current);
             };
         }, [])
     );
@@ -99,15 +108,26 @@ export default function CameraScreen() {
     useEffect(() => {
         if (isAIEnabled) {
             frameBorderColor.value = withTiming(1, { duration: 300 });
-            cornerColorProgress.value = withTiming(processing ? 1 : 0.5, { duration: 300 });
+            cornerColorProgress.value = withTiming(0.5, { duration: 300 });
         } else {
             frameBorderColor.value = withTiming(0, { duration: 300 });
             cornerColorProgress.value = withTiming(0, { duration: 300 });
         }
 
+        return () => {
+            cancelAnimation(frameBorderColor);
+            cancelAnimation(scanLineTop);
+            cancelAnimation(scanLineActive);
+            cancelAnimation(cornerColorProgress);
+            cancelAnimation(lockOnProgress);
+        };
+    }, [isAIEnabled]);
+
+    useEffect(() => {
         if (processing && isAIEnabled) {
             // Fade in processing overlay
             processingFade.value = withTiming(1, { duration: 300 });
+            cornerColorProgress.value = withTiming(1, { duration: 300 });
 
             // Ripple rings (staggered expanding circles)
             const animateRipple = (scale: any, opacity: any, delay: number) => {
@@ -132,6 +152,9 @@ export default function CameraScreen() {
         } else {
             // Fade out processing overlay
             processingFade.value = withTiming(0, { duration: 200 });
+            if (isAIEnabled) {
+                cornerColorProgress.value = withTiming(0.5, { duration: 300 });
+            }
             cancelAnimation(ripple1Scale); cancelAnimation(ripple1Opacity);
             cancelAnimation(ripple2Scale); cancelAnimation(ripple2Opacity);
             cancelAnimation(ripple3Scale); cancelAnimation(ripple3Opacity);
@@ -141,17 +164,12 @@ export default function CameraScreen() {
         }
 
         return () => {
-            cancelAnimation(frameBorderColor);
-            cancelAnimation(scanLineTop);
-            cancelAnimation(scanLineActive);
-            cancelAnimation(cornerColorProgress);
             cancelAnimation(processingFade);
             cancelAnimation(ripple1Scale); cancelAnimation(ripple1Opacity);
             cancelAnimation(ripple2Scale); cancelAnimation(ripple2Opacity);
             cancelAnimation(ripple3Scale); cancelAnimation(ripple3Opacity);
-            cancelAnimation(lockOnProgress);
         };
-    }, [isAIEnabled, processing]);
+    }, [processing]);
 
     const cameraFrameStyle = useAnimatedStyle(() => {
         const borderColor = interpolateColor(
@@ -221,7 +239,7 @@ const scanLogoOutlineStyle = useAnimatedStyle(() => {
     // Processing overlay fade
     const processingOverlayStyle = useAnimatedStyle(() => ({
         opacity: processingFade.value,
-        pointerEvents: processingFade.value > 0.05 ? 'none' : 'none',
+        pointerEvents: 'none',
     }));
 
     // Processing ripple rings
@@ -267,9 +285,12 @@ const scanLogoOutlineStyle = useAnimatedStyle(() => {
     }
 
     const takePicture = async () => {
-        if (!cameraRef.current) return;
+        if (isCapturing.current) return;
+        isCapturing.current = true;
+        if (!cameraRef.current) { isCapturing.current = false; return; }
         if (photoUris.length >= 3) {
             setAlert({ visible: true, message: 'En fazla 3 fotoğraf çekebilirsiniz.', type: 'warning' });
+            isCapturing.current = false;
             return;
         }
         try {
@@ -297,6 +318,8 @@ const scanLogoOutlineStyle = useAnimatedStyle(() => {
             }
         } catch (err) {
             setAlert({ visible: true, message: 'Kamera donanım hatası. Tekrar deneyin.', type: 'error' });
+        } finally {
+            isCapturing.current = false;
         }
     };
 
@@ -306,12 +329,15 @@ const scanLogoOutlineStyle = useAnimatedStyle(() => {
 
     const handleProceed = async () => {
         if (photoUris.length === 0) return;
+        abortControllerRef.current = new AbortController();
+        const signal = abortControllerRef.current.signal;
         setProcessing(true);
         if (isAIEnabled) audio.playScan();
         try {
             if (isAIEnabled) {
                 console.log('[Camera] Analiz başlıyor...');
-                const result = await analyzeImage(photoUris);
+                const result = await analyzeImage(photoUris, signal);
+                if (!isMounted.current) return;
                 audio.playComplete();
                 Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                 // Lock-on animation before navigating
@@ -320,6 +346,7 @@ const scanLogoOutlineStyle = useAnimatedStyle(() => {
                     withTiming(0, { duration: 0 })
                 );
                 await new Promise(resolve => setTimeout(resolve, 320));
+                if (!isMounted.current) return;
                 router.push({
                     pathname: '/review',
                     params: {
@@ -341,11 +368,12 @@ const scanLogoOutlineStyle = useAnimatedStyle(() => {
                 });
             } else {
                 console.log('[Camera] Yalnızca fotoğraf yükleniyor (Yapay Zeka Kapalı)...');
-                const urls = await uploadImages(photoUris);
+                const urls = await uploadImages(photoUris, signal);
+                if (!isMounted.current) return;
                 audio.playComplete();
                 setAlert({ visible: true, message: 'Fotoğraflar yüklendi!', type: 'success' });
 
-                setTimeout(() => {
+                navigationTimeoutRef.current = setTimeout(() => {
                     router.push({
                         pathname: '/review',
                         params: {
@@ -368,21 +396,28 @@ const scanLogoOutlineStyle = useAnimatedStyle(() => {
                 }, 1000);
             }
         } catch (err: any) {
+            if (err.name === 'AbortError' || signal.aborted) return;
             console.log('[Camera] İşlem hatası:', err.message);
             const msg = err.message?.includes('timeout')
                 ? 'Sunucu yanıt vermedi. Bağlantınızı kontrol edin.'
                 : err.message?.includes('413')
                 ? 'Fotoğraflar çok büyük. Daha az fotoğraf deneyin.'
                 : err.message || 'Sunucuya bağlanılamadı.';
+            if (!isMounted.current) return;
             setAlert({ visible: true, message: msg, type: 'error' });
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         } finally {
-            setProcessing(false);
+            if (isMounted.current) {
+                setProcessing(false);
+            }
             audio.stopScan();
         }
     };
 
     const clearAll = () => {
+        abortControllerRef.current?.abort();
+        abortControllerRef.current = null;
+        if (navigationTimeoutRef.current) clearTimeout(navigationTimeoutRef.current);
         setPhotoUris([]);
         setProcessing(false);
     };
@@ -558,7 +593,7 @@ const scanLogoOutlineStyle = useAnimatedStyle(() => {
                                 style={StyleSheet.absoluteFillObject}
                             />
                             {processing ? (
-                                <Text style={styles.analyzeBtnText}>TARANYOR</Text>
+                                <Text style={styles.analyzeBtnText}>TARANIYOR</Text>
                             ) : (
                                 <>
                                     {isAIEnabled ? (
@@ -581,7 +616,6 @@ const scanLogoOutlineStyle = useAnimatedStyle(() => {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#000' },
-    cameraWrapper: { flex: 1 },
 
     permissionContainer: {
         flex: 1,
@@ -889,33 +923,32 @@ const styles = StyleSheet.create({
     },
 });
 
-function RulerOverlay() {
-    const TICK_COLOR = 'rgba(255,255,255,0.15)';
-    const TICK_ACCENT = 'rgba(59,130,246,0.30)';
-    const COUNT = 36;
-    const ticks: React.ReactElement[] = [];
+const RULER_TICK_COLOR = 'rgba(255,255,255,0.15)';
+const RULER_TICK_ACCENT = 'rgba(59,130,246,0.30)';
+const RULER_COUNT = 36;
+const rulerTicks: React.ReactElement[] = [];
+for (let i = 1; i < RULER_COUNT; i++) {
+    const pct = (i / RULER_COUNT) * 100;
+    const isAccent = i % 3 === 0;
+    const color = isAccent ? RULER_TICK_ACCENT : RULER_TICK_COLOR;
+    const shortLen = '1.5%';
+    const longLen = '3%';
+    const len = isAccent ? longLen : shortLen;
 
-    for (let i = 1; i < COUNT; i++) {
-        const pct = (i / COUNT) * 100;
-        const isAccent = i % 3 === 0;
-        const color = isAccent ? TICK_ACCENT : TICK_COLOR;
-        const shortLen = '1.5%';
-        const longLen = '3%';
-        const len = isAccent ? longLen : shortLen;
+    // Top edge
+    rulerTicks.push(<Line key={`t${i}`} x1={`${pct}%`} y1="0%" x2={`${pct}%`} y2={len} stroke={color} strokeWidth="1" />);
+    // Bottom edge
+    rulerTicks.push(<Line key={`b${i}`} x1={`${pct}%`} y1="100%" x2={`${pct}%`} y2={isAccent ? '97%' : '98.5%'} stroke={color} strokeWidth="1" />);
+    // Left edge
+    rulerTicks.push(<Line key={`l${i}`} x1="0%" y1={`${pct}%`} x2={len} y2={`${pct}%`} stroke={color} strokeWidth="1" />);
+    // Right edge
+    rulerTicks.push(<Line key={`r${i}`} x1="100%" y1={`${pct}%`} x2={isAccent ? '97%' : '98.5%'} y2={`${pct}%`} stroke={color} strokeWidth="1" />);
+}
 
-        // Top edge
-        ticks.push(<Line key={`t${i}`} x1={`${pct}%`} y1="0%" x2={`${pct}%`} y2={len} stroke={color} strokeWidth="1" />);
-        // Bottom edge
-        ticks.push(<Line key={`b${i}`} x1={`${pct}%`} y1="100%" x2={`${pct}%`} y2={isAccent ? '97%' : '98.5%'} stroke={color} strokeWidth="1" />);
-        // Left edge
-        ticks.push(<Line key={`l${i}`} x1="0%" y1={`${pct}%`} x2={len} y2={`${pct}%`} stroke={color} strokeWidth="1" />);
-        // Right edge
-        ticks.push(<Line key={`r${i}`} x1="100%" y1={`${pct}%`} x2={isAccent ? '97%' : '98.5%'} y2={`${pct}%`} stroke={color} strokeWidth="1" />);
-    }
-
+const RulerOverlay = React.memo(function RulerOverlay() {
     return (
         <Svg style={StyleSheet.absoluteFillObject} pointerEvents="none">
-            {ticks}
+            {rulerTicks}
         </Svg>
     );
-}
+});
