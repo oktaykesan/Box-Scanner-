@@ -13,7 +13,6 @@ import { Camera, RefreshCw, Cpu, Settings, X, ChevronRight } from 'lucide-react-
 import Animated, {
     useSharedValue,
     useAnimatedStyle,
-    useDerivedValue,
     withTiming,
     withRepeat,
     withSequence,
@@ -26,6 +25,7 @@ import Animated, {
 import { Colors, Spacing, Typography, BorderRadius, Shadow } from '../constants/theme';
 import { Config } from '../constants/config';
 import { analyzeImage, uploadImages } from '../services/api';
+import { useScanStore } from '../store/useScanStore';
 import { AIAnalysisToggle } from '../components/AIAnalysisToggle';
 import { AlertBanner } from '../components/AlertBanner';
 import { useAIAudio } from '../hooks/useAIAudio';
@@ -45,6 +45,8 @@ export default function CameraScreen() {
     const [alert, setAlert] = useState<{ visible: boolean; message: string; type: 'success' | 'error' | 'warning' }>({
         visible: false, message: '', type: 'success'
     });
+
+    const setResult = useScanStore((s) => s.setResult);
 
     const audio = useAIAudio();
     const cameraRef = useRef<CameraView>(null);
@@ -76,8 +78,6 @@ export default function CameraScreen() {
 
     // Camera Frame Animations
     const frameBorderColor = useSharedValue(0); // 0 = inactive, 1 = active
-    const scanLineTop = useSharedValue(0); // 0–100 (percentage)
-    const scanLineActive = useSharedValue(0); // 0 = inactive, 1 = active (for fade in/out)
     const cornerColorProgress = useSharedValue(0); // 0=inactive, 0.5=blue, 1=red
 
     // Capture: shutter curtain + ring
@@ -99,12 +99,6 @@ export default function CameraScreen() {
     // Lock-on animation
     const lockOnProgress = useSharedValue(0);
 
-    // Derive opacity: active=1 → linear drop 0.8→0.3 based on position; active=0 → 0
-    const scanLineOpacity = useDerivedValue(() => {
-        if (scanLineActive.value < 0.01) return 0;
-        return interpolate(scanLineTop.value, [0, 100], [0.8, 0.3]);
-    });
-
     useEffect(() => {
         if (isAIEnabled) {
             frameBorderColor.value = withTiming(1, { duration: 300 });
@@ -116,8 +110,6 @@ export default function CameraScreen() {
 
         return () => {
             cancelAnimation(frameBorderColor);
-            cancelAnimation(scanLineTop);
-            cancelAnimation(scanLineActive);
             cancelAnimation(cornerColorProgress);
             cancelAnimation(lockOnProgress);
         };
@@ -187,11 +179,6 @@ export default function CameraScreen() {
             elevation: frameBorderColor.value * 24,
         };
     });
-
-    const scanLineStyle = useAnimatedStyle(() => ({
-        top: `${scanLineTop.value}%`,
-        opacity: scanLineOpacity.value,
-    }));
 
 const scanLogoOutlineStyle = useAnimatedStyle(() => {
         const alpha = Math.round(frameBorderColor.value * 204); // 0–204 (0x00–0xCC)
@@ -335,8 +322,7 @@ const scanLogoOutlineStyle = useAnimatedStyle(() => {
         if (isAIEnabled) audio.playScan();
         try {
             if (isAIEnabled) {
-                console.log('[Camera] Analiz başlıyor...');
-                const result = await analyzeImage(photoUris, signal);
+                    const result = await analyzeImage(photoUris, signal);
                 if (!isMounted.current) return;
                 audio.playComplete();
                 Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -347,57 +333,51 @@ const scanLogoOutlineStyle = useAnimatedStyle(() => {
                 );
                 await new Promise(resolve => setTimeout(resolve, 320));
                 if (!isMounted.current) return;
-                router.push({
-                    pathname: '/review',
-                    params: {
-                        imageUrl: result.imageUrl,
-                        imageUrls: JSON.stringify(result.imageUrls || [result.imageUrl]),
-                        items: JSON.stringify(result.items),
-                        provider: result.analysisMeta.provider,
-                        status: result.analysisMeta.status,
-                        suggestedTitle: result.suggested_title ?? '',
-                        suggestedLocation: result.suggested_location ?? '',
-                        damageFlag: String(result.damage_flag ?? false),
-                        damageNotes: result.damage_notes ?? '',
-                        hazardFlag: String(result.hazard_flag ?? false),
-                        hazardNotes: result.hazard_notes ?? '',
-                        confidence: result.confidence ?? '',
-                        analysisNotes: result.analysisNotes ?? '',
-                        summary: result.summary ?? '',
-                    },
+                setResult({
+                    imageUrl: result.imageUrl,
+                    imageUrls: result.imageUrls?.length ? result.imageUrls : [result.imageUrl],
+                    items: result.items,
+                    provider: result.analysisMeta.provider,
+                    status: result.analysisMeta.status,
+                    suggestedTitle: result.suggested_title ?? '',
+                    suggestedLocation: result.suggested_location ?? '',
+                    damageFlag: result.damage_flag ?? false,
+                    damageNotes: result.damage_notes ?? '',
+                    hazardFlag: result.hazard_flag ?? false,
+                    hazardNotes: result.hazard_notes ?? '',
+                    confidence: result.confidence ?? 0,
+                    analysisNotes: result.analysisNotes ?? '',
+                    summary: result.summary ?? '',
                 });
+                router.push('/review');
             } else {
-                console.log('[Camera] Yalnızca fotoğraf yükleniyor (Yapay Zeka Kapalı)...');
                 const urls = await uploadImages(photoUris, signal);
                 if (!isMounted.current) return;
                 audio.playComplete();
                 setAlert({ visible: true, message: 'Fotoğraflar yüklendi!', type: 'success' });
 
                 navigationTimeoutRef.current = setTimeout(() => {
-                    router.push({
-                        pathname: '/review',
-                        params: {
-                            imageUrl: urls[0] || '',
-                            imageUrls: JSON.stringify(urls),
-                            items: JSON.stringify([]),
-                            provider: 'none',
-                            status: 'manual',
-                            suggestedTitle: '',
-                            suggestedLocation: '',
-                            damageFlag: 'false',
-                            damageNotes: '',
-                            hazardFlag: 'false',
-                            hazardNotes: '',
-                            confidence: '',
-                            analysisNotes: '',
-                            summary: '',
-                        },
+                    setResult({
+                        imageUrl: urls[0] || '',
+                        imageUrls: urls,
+                        items: [],
+                        provider: 'none',
+                        status: 'manual',
+                        suggestedTitle: '',
+                        suggestedLocation: '',
+                        damageFlag: false,
+                        damageNotes: '',
+                        hazardFlag: false,
+                        hazardNotes: '',
+                        confidence: 0,
+                        analysisNotes: '',
+                        summary: '',
                     });
+                    router.push('/review');
                 }, 1000);
             }
         } catch (err: any) {
             if (err.name === 'AbortError' || signal.aborted) return;
-            console.log('[Camera] İşlem hatası:', err.message);
             const msg = err.message?.includes('timeout')
                 ? 'Sunucu yanıt vermedi. Bağlantınızı kontrol edin.'
                 : err.message?.includes('413')
@@ -528,7 +508,6 @@ const scanLogoOutlineStyle = useAnimatedStyle(() => {
                         isEnabled={isAIEnabled}
                         isAnalyzing={processing && isAIEnabled}
                         onToggle={(val) => {
-                            console.log('[Toggle] değişti:', val);
                             if (val) {
                                 audio.playActivate();
                             } else {
@@ -699,33 +678,6 @@ const styles = StyleSheet.create({
         fontSize: 32,
         letterSpacing: 4,
         color: Colors.blue.light,
-    },
-    scanLineWrapper: {
-        position: 'absolute',
-        left: 0,
-        right: 0,
-        height: 32, // increased from 24 to give more glow room
-        justifyContent: 'center',
-        // remove shadow props — they are clipped by overflow:hidden parent
-    },
-    scanLineGlow: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-    },
-    scanLineSolid: {
-        height: 2,
-        width: '100%',
-    },
-    progressBarContainer: {
-        position: 'absolute',
-        bottom: 0,
-        left: 0,
-        right: 0,
-        height: 4,
-        backgroundColor: 'rgba(0,0,0,0.5)',
     },
     controlsBottom: {
         backgroundColor: Colors.bg.app,

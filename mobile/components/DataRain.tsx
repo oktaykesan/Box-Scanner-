@@ -1,16 +1,12 @@
 // DataRain — Matrix-style falling character rain component
 // Usage: <DataRain opacity={0.85} active={processing} />
 
-import React, { useEffect, useRef, useState, memo } from 'react';
-import { View, Text, StyleSheet, Dimensions } from 'react-native';
-
-const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
+import React, { useEffect, useRef, useState, useMemo, memo } from 'react';
+import { View, Text, StyleSheet, useWindowDimensions } from 'react-native';
 
 const FONT_SIZE = 11;
-const COLS = Math.floor(SCREEN_W / FONT_SIZE);
-const ROWS = Math.ceil(SCREEN_H / FONT_SIZE) + 4;
 const TRAIL_LENGTH = 14;
-const FRAME_MS = 75; // ~13fps — smooth enough for matrix effect
+const FRAME_MS = 100; // ~10fps — reduced CPU usage
 
 // Character pool: hex digits + symbols + minimal katakana feel
 const CHARS = '01234567890ABCDEF<>[]{}|/\\ΔΨΩ∑∏≠≈';
@@ -25,10 +21,10 @@ function randomChar(): string {
     return CHARS[Math.floor(Math.random() * CHARS.length)];
 }
 
-function initCols(): ColState[] {
-    return Array.from({ length: COLS }, () => ({
-        head: -Math.floor(Math.random() * ROWS),
-        chars: Array.from({ length: ROWS }, randomChar),
+function initCols(cols: number, rows: number): ColState[] {
+    return Array.from({ length: cols }, () => ({
+        head: -Math.floor(Math.random() * rows),
+        chars: Array.from({ length: rows }, randomChar),
         speed: 0.4 + Math.random() * 1.4,
     }));
 }
@@ -53,8 +49,20 @@ const DataRain = memo(function DataRain({
     midColor = '#4A6490',
     active = true,
 }: DataRainProps) {
-    const [cols, setCols] = useState<ColState[]>(initCols);
+    const { width: SCREEN_W, height: SCREEN_H } = useWindowDimensions();
+
+    const COLS = useMemo(() => Math.floor(SCREEN_W / FONT_SIZE), [SCREEN_W]);
+    const ROWS = useMemo(() => Math.ceil(SCREEN_H / FONT_SIZE) + 4, [SCREEN_H]);
+
+    const colsRef = useRef<ColState[]>([]);
+    const [tick, setTick] = useState(0);
     const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+    // Re-initialize columns when dimensions change
+    useEffect(() => {
+        colsRef.current = initCols(COLS, ROWS);
+        setTick(t => t + 1);
+    }, [COLS, ROWS]);
 
     useEffect(() => {
         if (!active) {
@@ -63,35 +71,37 @@ const DataRain = memo(function DataRain({
         }
 
         intervalRef.current = setInterval(() => {
-            setCols(prev =>
-                prev.map(col => {
-                    const newHead = col.head + col.speed;
-                    const headRow = Math.floor(newHead);
-                    const newChars = [...col.chars];
+            const current = colsRef.current;
+            for (let i = 0; i < current.length; i++) {
+                const col = current[i];
+                const newHead = col.head + col.speed;
+                const headRow = Math.floor(newHead);
 
-                    // Randomise char at the head position as it passes
-                    if (headRow >= 0 && headRow < ROWS) {
-                        newChars[headRow] = randomChar();
-                    }
+                // Randomise char at the head position as it passes
+                if (headRow >= 0 && headRow < col.chars.length) {
+                    col.chars[headRow] = randomChar();
+                }
 
-                    // Reset column when it scrolls off-screen
-                    if (newHead > ROWS + TRAIL_LENGTH) {
-                        return {
-                            head: -Math.floor(Math.random() * 6),
-                            chars: Array.from({ length: ROWS }, randomChar),
-                            speed: 0.4 + Math.random() * 1.4,
-                        };
-                    }
-
-                    return { ...col, head: newHead, chars: newChars };
-                })
-            );
+                // Reset column when it scrolls off-screen
+                if (newHead > ROWS + TRAIL_LENGTH) {
+                    current[i] = {
+                        head: -Math.floor(Math.random() * 6),
+                        chars: Array.from({ length: ROWS }, randomChar),
+                        speed: 0.4 + Math.random() * 1.4,
+                    };
+                } else {
+                    col.head = newHead;
+                }
+            }
+            setTick(t => t + 1);
         }, FRAME_MS);
 
         return () => {
             if (intervalRef.current) clearInterval(intervalRef.current);
         };
-    }, [active]);
+    }, [active, ROWS]);
+
+    const cols = colsRef.current;
 
     return (
         <View

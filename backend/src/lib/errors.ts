@@ -102,7 +102,7 @@ export function globalErrorHandler(err: Error, c: Context) {
 
     // Unknown errors → 500
     const appError = Errors.internal(
-        process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message
+        process.env.NODE_ENV !== 'development' ? 'Internal server error' : err.message
     );
     return c.json(buildErrorResponse(appError), 500);
 }

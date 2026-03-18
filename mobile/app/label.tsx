@@ -1,5 +1,14 @@
 // BoxScan — LabelScreen: QR code preview + print (Lasersan Factory V5)
 
+function escapeHtml(str: string): string {
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 import { useState, useEffect } from 'react';
 import {
     View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Image,
@@ -10,12 +19,15 @@ import * as Print from 'expo-print';
 import { CheckCircle, Printer, Check } from 'lucide-react-native';
 import { Colors, Spacing, Typography, BorderRadius, Shadow } from '../constants/theme';
 import { getQR } from '../services/api';
+import { useScanStore } from '../store/useScanStore';
 
 export default function LabelScreen() {
     const router = useRouter();
     const params = useLocalSearchParams();
     const boxId = params.boxId as string;
     const boxTitle = params.boxTitle as string || 'Untitled Box';
+
+    const clearStore = useScanStore((s) => s.clearStore);
 
     const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
@@ -30,7 +42,7 @@ export default function LabelScreen() {
             const result = await getQR(boxId);
             setQrDataUrl(result.qrCodeDataUrl);
         } catch (err: any) {
-            console.log('QR load error:', err.message);
+            // QR load error silently handled — loading state covers UI
         } finally {
             setLoading(false);
         }
@@ -55,8 +67,8 @@ export default function LabelScreen() {
           <body>
             <div class="label">
               <img class="qr" src="${qrDataUrl}" />
-              <div class="title">${boxTitle}</div>
-              <div class="id">ID: ${boxId}</div>
+              <div class="title">${escapeHtml(boxTitle)}</div>
+              <div class="id">ID: ${escapeHtml(boxId)}</div>
               <div class="brand">LASERSAN // BOXSCAN</div>
             </div>
           </body>
@@ -64,13 +76,14 @@ export default function LabelScreen() {
       `;
             await Print.printAsync({ html });
         } catch (err: any) {
-            console.log('Print error:', err.message);
+            // Print error silently handled — user can retry
         } finally {
             setPrinting(false);
         }
     };
 
     const goHome = () => {
+        clearStore();
         router.replace('/');
     };
 

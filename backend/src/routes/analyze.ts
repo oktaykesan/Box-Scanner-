@@ -2,19 +2,20 @@
 
 import { Hono } from 'hono';
 import { analyzeImages } from '../services/ai.js';
-import { saveFile } from '../services/storage.js';
+import { saveFile, deleteFiles } from '../services/storage.js';
 import { normalizeItems } from '../services/items.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { buildSuccessResponse, Errors } from '../lib/errors.js';
+import { config } from '../config.js';
+import { validateMagicBytes } from '../lib/magicBytes.js';
 import type { AnalyzeResponse } from '../shared/types.js';
 
 const app = new Hono();
 
 // Allowed MIME types
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
-const MAX_UPLOAD_MB = parseInt(process.env.MAX_UPLOAD_MB || '10', 10);
-const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
+const MAX_UPLOAD_BYTES = config.upload.maxMb * 1024 * 1024;
 
 /**
  * POST /api/analyze
@@ -60,6 +61,15 @@ app.post(
 
             const arrayBuffer = await file.arrayBuffer();
             const imageBuffer = Buffer.from(arrayBuffer);
+
+            // Magic byte validation — prevents MIME type spoofing via client-controlled headers
+            if (!validateMagicBytes(imageBuffer)) {
+                throw Errors.badRequest(
+                    `File "${file.name || 'unknown'}" failed magic byte validation. ` +
+                    'Only JPEG, PNG, WebP, and HEIC/HEIF images are accepted.'
+                );
+            }
+
             const imageUrl = await saveFile(imageBuffer, file.name || 'capture.jpg', file.type);
 
             if (!primaryImageUrl) primaryImageUrl = imageUrl;
@@ -72,8 +82,15 @@ app.post(
             throw Errors.badRequest('No valid allowed images uploaded after validation');
         }
 
-        // AI Analysis
-        const result = await analyzeImages(imagesToAnalyze);
+        // AI Analysis — wrap in try-catch to delete orphan files on failure
+        let result;
+        try {
+            result = await analyzeImages(imagesToAnalyze);
+        } catch (err) {
+            // Orphan dosyaları temizle
+            await deleteFiles(savedImageUrls).catch(() => {});
+            throw err; // hatayı yukarıya ilet
+        }
 
         console.log('[Analyze] AI result status:', result.meta.status);
         console.log('[Analyze] AI items count:', result.items.length);

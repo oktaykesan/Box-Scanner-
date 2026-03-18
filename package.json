@@ -1,0 +1,11 @@
+{
+  "name": "qr-project",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Root package for QR project",
+  "workspaces": [
+    "mobile",
+    "backend",
+    "shared"
+  ]
+}

@@ -22,8 +22,8 @@ app.get(
     authMiddleware(),
     validateParams(BoxIdForQRParamSchema),
     async (c) => {
-        const { boxId } = c.get('validatedParams') as any;
-        const db = await getDb();
+        const { boxId } = (c as any).get('validatedParams');
+        const db = getDb();
 
         const box = queryOne(db, 'SELECT * FROM boxes WHERE id = ?', [boxId]);
         if (!box) throw Errors.notFound('Box', boxId);

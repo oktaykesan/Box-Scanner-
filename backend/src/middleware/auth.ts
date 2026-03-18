@@ -1,6 +1,8 @@
 // BoxScan — Auth Middleware (Shared Secret)
 
+import { timingSafeEqual } from 'crypto';
 import type { Context, Next } from 'hono';
+import { config } from '../config.js';
 import { Errors } from '../lib/errors.js';
 
 /**
@@ -10,7 +12,7 @@ import { Errors } from '../lib/errors.js';
  */
 export function authMiddleware() {
     return async (c: Context, next: Next) => {
-        const secret = process.env.API_SHARED_SECRET;
+        const secret = config.auth.sharedSecret;
 
         // Fail-closed: never bypass auth if the secret is missing or empty
         if (!secret || secret.trim() === '') {
@@ -23,7 +25,17 @@ export function authMiddleware() {
 
         const providedKey = apiKey || bearerToken;
 
-        if (!providedKey || providedKey !== secret) {
+        if (!providedKey) {
+            throw Errors.unauthorized('Invalid or missing API key');
+        }
+
+        const providedKeyBuf = Buffer.from(providedKey);
+        const secretBuf = Buffer.from(secret);
+        const keysMatch =
+            providedKeyBuf.length === secretBuf.length &&
+            timingSafeEqual(providedKeyBuf, secretBuf);
+
+        if (!keysMatch) {
             throw Errors.unauthorized('Invalid or missing API key');
         }
 
@@ -36,7 +48,7 @@ export function authMiddleware() {
  * Throws a fatal error and prevents the server from starting if missing.
  */
 export function assertAuthConfigured(): void {
-    const secret = process.env.API_SHARED_SECRET;
+    const secret = config.auth.sharedSecret;
     if (!secret || secret.trim() === '') {
         console.error('[FATAL] API_SHARED_SECRET environment variable is not set. Server cannot start.');
         process.exit(1);

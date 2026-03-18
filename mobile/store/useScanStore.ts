@@ -8,6 +8,7 @@ export interface ScannedItem {
     name: string;
     quantity?: number;
     unit?: string;
+    category?: string;
     notes?: string;
 }
 

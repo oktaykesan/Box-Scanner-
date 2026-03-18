@@ -38,7 +38,6 @@ export default function BoxesScreen() {
             setBoxes(data.boxes);
             setTotal(data.total);
         } catch (err: any) {
-            console.log('Failed to load boxes:', err.message);
             setLoadError('Sunucuya bağlanılamadı');
         } finally {
             setLoading(false);

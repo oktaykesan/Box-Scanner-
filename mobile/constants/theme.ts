@@ -53,6 +53,7 @@ export const Colors = {
         warning:    '#D97706',
         warningBg:  'rgba(217,119,6,0.10)',
         error:      '#DC2626',
+        errorText:  '#DC2626',
         errorBg:    '#FEE2E5',
         info:       '#2563EB',
         infoBg:     'rgba(37,99,235,0.10)',

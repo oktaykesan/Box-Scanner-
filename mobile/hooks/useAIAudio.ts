@@ -1,98 +1,67 @@
-import { useEffect, useRef, useCallback } from 'react';
-import { Audio } from 'expo-av';
+import { useEffect, useCallback } from 'react';
+import { useAudioPlayer, setAudioModeAsync } from 'expo-audio';
 import { useFocusEffect } from 'expo-router';
 
 export function useAIAudio() {
-    const activateSound = useRef<Audio.Sound | null>(null);
-    const deactivateSound = useRef<Audio.Sound | null>(null);
-    const scanSound = useRef<Audio.Sound | null>(null);
-    const completeSound = useRef<Audio.Sound | null>(null);
-
-    const loadSounds = useCallback(async () => {
-        try {
-            await Audio.setAudioModeAsync({
-                allowsRecordingIOS: false,
-                playsInSilentModeIOS: true,
-                staysActiveInBackground: false,
-                shouldDuckAndroid: true,
-                playThroughEarpieceAndroid: false,
-            });
-
-            await Promise.allSettled([
-                activateSound.current?.unloadAsync(),
-                deactivateSound.current?.unloadAsync(),
-                scanSound.current?.unloadAsync(),
-                completeSound.current?.unloadAsync(),
-            ]);
-
-            const [a, d, s, c] = await Promise.all([
-                Audio.Sound.createAsync(require('../assets/sounds/activate.wav')),
-                Audio.Sound.createAsync(require('../assets/sounds/deactivate.wav')),
-                Audio.Sound.createAsync(require('../assets/sounds/scan.wav')),
-                Audio.Sound.createAsync(require('../assets/sounds/complete.wav')),
-            ]);
-
-            activateSound.current = a.sound;
-            deactivateSound.current = d.sound;
-            scanSound.current = s.sound;
-            completeSound.current = c.sound;
-        } catch (error) {
-            console.warn('[Audio] Ses sistemi başlatılamadı:', error);
-        }
-    }, []); // ref'ler dependency gerektirmez
+    const activatePlayer = useAudioPlayer(require('../assets/sounds/activate.wav'));
+    const deactivatePlayer = useAudioPlayer(require('../assets/sounds/deactivate.wav'));
+    const scanPlayer = useAudioPlayer(require('../assets/sounds/scan.wav'));
+    const completePlayer = useAudioPlayer(require('../assets/sounds/complete.wav'));
 
     useEffect(() => {
-        loadSounds();
-        return () => {
-            activateSound.current?.unloadAsync().catch(() => { });
-            deactivateSound.current?.unloadAsync().catch(() => { });
-            scanSound.current?.unloadAsync().catch(() => { });
-            completeSound.current?.unloadAsync().catch(() => { });
-        };
-    }, [loadSounds]);
+        setAudioModeAsync({
+            playsInSilentModeIOS: true,
+            shouldDuckAndroid: true,
+        }).catch((err) => {
+            console.warn('[Audio] Ses modu ayarlanamadı:', err);
+        });
+    }, []);
 
+    // useFocusEffect: ekrana dönüldüğünde ses modunu yeniden uygula
     useFocusEffect(
         useCallback(() => {
-            const check = async () => {
-                const status = await activateSound.current?.getStatusAsync().catch(() => null);
-                if (!status || !status.isLoaded) await loadSounds();
-            };
-            check();
-        }, [loadSounds])
+            setAudioModeAsync({
+                playsInSilentModeIOS: true,
+                shouldDuckAndroid: true,
+            }).catch((err) => {
+                console.warn('[Audio] Ses modu (focus) ayarlanamadı:', err);
+            });
+        }, [])
     );
 
-    // Tek yerde tanımla, ref üzerinden çalışır — bağımlılık yok
-    const playSound = useCallback(async (
-        soundRef: React.MutableRefObject<Audio.Sound | null>
-    ) => {
+    const playSoundPlayer = useCallback((player: ReturnType<typeof useAudioPlayer>) => {
         try {
-            if (!soundRef.current) return;
-            const status = await soundRef.current.getStatusAsync();
-            if (!status.isLoaded) return;
-            if (status.isPlaying) await soundRef.current.stopAsync();
-            await soundRef.current.setPositionAsync(0);
-            await soundRef.current.playAsync();
+            player.seekTo(0);
+            player.play();
         } catch (err) {
             console.warn('[Audio] Çalma hatası:', err);
         }
     }, []);
 
-    const playActivate = useCallback(() => playSound(activateSound), [playSound]);
-    const playDeactivate = useCallback(() => playSound(deactivateSound), [playSound]);
-    const playScan = useCallback(() => playSound(scanSound), [playSound]);
-    const playComplete = useCallback(() => playSound(completeSound), [playSound]);
+    const playActivate = useCallback(() => {
+        playSoundPlayer(activatePlayer);
+    }, [playSoundPlayer, activatePlayer]);
 
-    const stopScan = useCallback(async () => {
+    const playDeactivate = useCallback(() => {
+        playSoundPlayer(deactivatePlayer);
+    }, [playSoundPlayer, deactivatePlayer]);
+
+    const playScan = useCallback(() => {
+        playSoundPlayer(scanPlayer);
+    }, [playSoundPlayer, scanPlayer]);
+
+    const playComplete = useCallback(() => {
+        playSoundPlayer(completePlayer);
+    }, [playSoundPlayer, completePlayer]);
+
+    const stopScan = useCallback(() => {
         try {
-            if (!scanSound.current) return;
-            const status = await scanSound.current.getStatusAsync();
-            if (status.isLoaded && status.isPlaying) {
-                await scanSound.current.stopAsync();
-            }
+            scanPlayer.pause();
+            scanPlayer.seekTo(0);
         } catch (err) {
             console.warn('[Audio] Stop hatası:', err);
         }
-    }, []);
+    }, [scanPlayer]);
 
     return { playActivate, playDeactivate, playScan, playComplete, stopScan };
 }

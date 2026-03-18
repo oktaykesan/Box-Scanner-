@@ -1,90 +1,61 @@
-// BoxScan — Database Connection (sql.js — pure JS SQLite)
+// BoxScan — Database Connection (better-sqlite3 — native SQLite)
 
-import initSqlJs, { type Database as SqlJsDatabase } from 'sql.js';
-import fs from 'fs';
+import Database from 'better-sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// DB_PATH can be overridden via env to place the file outside the web-served directory tree
+// DB_PATH config.ts üzerinden validate ediliyor (src/config.ts:db.path)
+// Circular dependency nedeniyle process.env doğrudan okunuyor
 const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, '../../boxscan.db');
 
-let _db: SqlJsDatabase | null = null;
+let _db: Database.Database | null = null;
 
 /**
  * Get the database instance (singleton).
- * Initializes on first call and loads existing DB file if present.
+ * better-sqlite3 opens/creates the file directly on first call.
  */
-export async function getDb(): Promise<SqlJsDatabase> {
+export function getDb(): Database.Database {
     if (_db) return _db;
-
-    const SQL = await initSqlJs();
-
-    if (fs.existsSync(DB_PATH)) {
-        const buffer = fs.readFileSync(DB_PATH);
-        _db = new SQL.Database(buffer);
-    } else {
-        _db = new SQL.Database();
-    }
-
-    // Enable foreign keys
-    _db.run('PRAGMA foreign_keys = ON');
-
+    _db = new Database(DB_PATH);
+    _db.pragma('journal_mode = WAL');   // WAL modu: crash-safe, concurrent okuma
+    _db.pragma('foreign_keys = ON');
     return _db;
 }
 
 /**
- * Save the database to disk.
- * Call after write operations.
+ * @deprecated better-sqlite3'e geçişten sonra artık gerekmiyor.
+ * WAL modu her write'ı doğrudan diske yazar.
+ * Geriye dönük uyumluluk için bırakıldı — ileriki sürümde kaldırılacak.
  */
-export function saveDb(): void {
-    if (!_db) return;
-    const data = _db.export();
-    const buffer = Buffer.from(data);
-    fs.writeFileSync(DB_PATH, buffer);
-}
+export function saveDb(): void {}
 
 /**
  * Helper: run a query and return all rows as objects.
  */
-export function queryAll(db: SqlJsDatabase, sql: string, params: any[] = []): any[] {
-    const stmt = db.prepare(sql);
-    stmt.bind(params);
-    const rows: any[] = [];
-    while (stmt.step()) {
-        rows.push(stmt.getAsObject());
-    }
-    stmt.free();
-    return rows;
+export function queryAll(db: Database.Database, sql: string, params: any[] = []): any[] {
+    return db.prepare(sql).all(...params);
 }
 
 /**
  * Helper: run a query and return the first row.
  */
-export function queryOne(db: SqlJsDatabase, sql: string, params: any[] = []): any | null {
-    const rows = queryAll(db, sql, params);
-    return rows.length > 0 ? rows[0] : null;
+export function queryOne(db: Database.Database, sql: string, params: any[] = []): any | null {
+    return db.prepare(sql).get(...params) ?? null;
 }
 
 /**
- * Helper: run an insert/update/delete and save to disk.
+ * Helper: run an insert/update/delete.
+ * better-sqlite3 writes synchronously to disk — no saveDb() needed.
  */
-export function execute(db: SqlJsDatabase, sql: string, params: any[] = []): void {
-    db.run(sql, params);
-    saveDb();
+export function execute(db: Database.Database, sql: string, params: any[] = []): void {
+    db.prepare(sql).run(...params);
 }
 
 /**
  * Helper: run multiple statements in a transaction.
  */
-export function runTransaction(db: SqlJsDatabase, fn: () => void): void {
-    db.run('BEGIN TRANSACTION');
-    try {
-        fn();
-        db.run('COMMIT');
-        saveDb();
-    } catch (err) {
-        db.run('ROLLBACK');
-        throw err;
-    }
+export function runTransaction(db: Database.Database, fn: () => void): void {
+    const txn = db.transaction(fn);
+    txn();
 }

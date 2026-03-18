@@ -1,8 +1,8 @@
-// BoxScan — Scan Route — sql.js version
+// BoxScan — Scan Route — better-sqlite3 version
 
 import { Hono } from 'hono';
 import { v4 as uuidv4 } from 'uuid';
-import { getDb, queryAll, queryOne, saveDb } from '../db/index.js';
+import { getDb, queryAll, queryOne, runTransaction } from '../db/index.js';
 import { validateBody } from '../lib/validation.js';
 import { buildSuccessResponse, Errors } from '../lib/errors.js';
 import { ScanPayloadSchema } from '../shared/schemas.js';
@@ -21,9 +21,9 @@ app.post(
     authMiddleware(),
     validateBody(ScanPayloadSchema),
     async (c) => {
-        const { boxId } = c.get('validatedBody') as any;
+        const { boxId } = (c as any).get('validatedBody');
         const now = new Date().toISOString();
-        const db = await getDb();
+        const db = getDb();
 
         const box = queryOne(db, 'SELECT * FROM boxes WHERE id = ?', [boxId]);
         if (!box) throw Errors.notFound('Box', boxId);
@@ -32,20 +32,13 @@ app.post(
             throw Errors.notFound('Box', boxId);
         }
 
-        // Update last_scanned_at
-        db.run('UPDATE boxes SET last_scanned_at = ? WHERE id = ?', [now, boxId]);
-
-        // Log scan event (write-only, Phase 01)
-        try {
-            db.run(
-                `INSERT INTO box_events (id, box_id, event_type, payload, created_at) VALUES (?, ?, 'scanned', NULL, ?)`,
-                [uuidv4(), boxId, now]
-            );
-        } catch (err) {
-            console.warn('[Scan] Failed to log scan event:', err);
-        }
-
-        saveDb();
+        // Update last_scanned_at and log scan event in a single transaction
+        runTransaction(db, () => {
+            db.prepare('UPDATE boxes SET last_scanned_at = ? WHERE id = ?').run(now, boxId);
+            db.prepare(
+                `INSERT INTO box_events (id, box_id, event_type, payload, created_at) VALUES (?, ?, 'scanned', NULL, ?)`
+            ).run(uuidv4(), boxId, now);
+        });
 
         // Fetch full box details
         const images = queryAll(db, 'SELECT * FROM box_images WHERE box_id = ?', [boxId]);

@@ -11,10 +11,11 @@ interface RateLimitEntry {
 const store = new Map<string, RateLimitEntry>();
 
 // Cleanup old entries every 5 minutes
+// 300_000ms (5dk) kullanılıyor — tüm olası rate limit window'larından büyük olduğu garanti
 setInterval(() => {
     const now = Date.now();
     for (const [key, entry] of store) {
-        entry.timestamps = entry.timestamps.filter((t) => now - t < 120_000);
+        entry.timestamps = entry.timestamps.filter((t) => now - t < 300_000);
         if (entry.timestamps.length === 0) store.delete(key);
     }
 }, 5 * 60 * 1000);

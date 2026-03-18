@@ -168,7 +168,7 @@ export interface AnalyzeResponse {
   damage_notes: string | null;
   hazard_flag: boolean;
   hazard_notes: string | null;
-  confidence?: "yüksek" | "orta" | "düşük" | string;
+  confidence?: number;
   analysisNotes?: string;
   summary: string;
   analysisMeta: AnalysisMeta;

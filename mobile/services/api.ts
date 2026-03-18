@@ -11,12 +11,17 @@ interface ApiResponse<T> {
     error?: { code: string; message: string };
 }
 
+function isNetworkError(err: unknown): boolean {
+    return err instanceof TypeError && (err as TypeError).message.includes('Network request failed');
+}
+
 /**
- * Base fetch wrapper with timeout and error handling.
+ * Base fetch wrapper with timeout, error handling, and optional retry.
  */
 async function request<T>(
     path: string,
-    options: RequestInit = {}
+    options: RequestInit = {},
+    retries = 2
 ): Promise<T> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), TIMEOUT);
@@ -42,6 +47,10 @@ async function request<T>(
     } catch (err: any) {
         if (err.name === 'AbortError') {
             throw new Error('Request timed out');
+        }
+        if (retries > 0 && isNetworkError(err)) {
+            await new Promise(r => setTimeout(r, 1000));
+            return request<T>(path, options, retries - 1);
         }
         throw err;
     } finally {
@@ -94,7 +103,7 @@ export interface AnalyzeResult {
     damage_notes?: string | null;
     hazard_flag?: boolean;
     hazard_notes?: string | null;
-    confidence?: string;
+    confidence?: number;
     analysisNotes?: string;
     summary?: string;
     analysisMeta: { provider: string; status: string; runId: string };
@@ -168,7 +177,7 @@ export async function deleteBox(id: string): Promise<void> {
     return request(`/api/boxes/${id}`, { method: 'DELETE' });
 }
 
-/** Analyze images (multipart upload) */
+/** Analyze images (multipart upload) — no retry: long-running AI operation */
 export async function analyzeImage(imageUris: string[], externalSignal?: AbortSignal): Promise<AnalyzeResult> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), TIMEOUT);
@@ -211,7 +220,7 @@ export async function analyzeImage(imageUris: string[], externalSignal?: AbortSi
     }
 }
 
-/** Upload images only (no AI) */
+/** Upload images only (no AI) — no retry: long-running upload operation */
 export async function uploadImages(imageUris: string[], externalSignal?: AbortSignal): Promise<string[]> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), TIMEOUT);

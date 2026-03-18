@@ -40,13 +40,20 @@ export default function ScanScreen() {
                 <Camera color={Colors.text.secondary} size={84} strokeWidth={1} style={{ marginBottom: Spacing.space5 }} />
                 <Text style={styles.permTitle}>KAMERA İZNİ GEREKLİ</Text>
                 <Text style={styles.permText}>QR kod tarayıcı modülü için donanım erişimine izin vermelisiniz.</Text>
-                <TouchableOpacity style={styles.permBtn} onPress={requestPermission}>
+                <TouchableOpacity
+                    style={styles.permBtn}
+                    onPress={requestPermission}
+                    accessibilityLabel="Kamera iznine izin ver"
+                    accessibilityRole="button"
+                >
                     <Text style={styles.permBtnText}>YETKİ VER</Text>
                 </TouchableOpacity>
                 {permission.canAskAgain === false && (
                     <TouchableOpacity
                         style={[styles.permBtn, styles.settingsBtn]}
                         onPress={() => Linking.openSettings()}
+                        accessibilityLabel="Uygulama ayarlarını aç"
+                        accessibilityRole="button"
                     >
                         <Settings color={Colors.text.primary} size={20} strokeWidth={2} style={{ marginRight: Spacing.space2 }} />
                         <Text style={styles.permBtnText}>AYARLARI AÇ</Text>
@@ -132,6 +139,8 @@ export default function ScanScreen() {
                         <TouchableOpacity
                             style={[styles.retryBtn, isError && styles.retryBtnErrorBg]}
                             onPress={retry}
+                            accessibilityLabel="Yeniden tara"
+                            accessibilityRole="button"
                         >
                             <RefreshCcw color={isError ? Colors.status.error : Colors.text.primary} size={20} strokeWidth={2} style={{ marginRight: Spacing.space2 }} />
                             <Text style={[styles.retryBtnText, isError && { color: Colors.status.error }]}>YENİDEN TARA</Text>
@@ -139,6 +148,8 @@ export default function ScanScreen() {
                         <TouchableOpacity
                             style={[styles.homeBtn, isError && styles.homeBtnErrorOutline]}
                             onPress={() => router.replace('/')}
+                            accessibilityLabel="Ana sayfaya dön"
+                            accessibilityRole="button"
                         >
                             <Home color={isError ? Colors.status.errorText : Colors.text.primary} size={20} strokeWidth={2} style={{ marginRight: Spacing.space2 }} />
                             <Text style={[styles.homeBtnText, isError && { color: Colors.status.errorText }]}>ANA SAYFAYA DÖN</Text>
@@ -156,8 +167,14 @@ export default function ScanScreen() {
                 facing="back"
                 barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
                 onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
+                accessibilityLabel="QR kod tarayıcı kamerası"
             />
-            <View style={styles.scanOverlay} pointerEvents="none">
+            <View
+                style={styles.scanOverlay}
+                pointerEvents="none"
+                accessibilityLabel="QR kod hedefleme çerçevesi"
+                accessibilityRole="image"
+            >
                 <View style={styles.scanFrame}>
                     <View style={[styles.corner, styles.topLeft]} />
                     <View style={[styles.corner, styles.topRight]} />

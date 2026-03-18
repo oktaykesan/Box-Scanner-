@@ -286,7 +286,7 @@ export default function BoxDetailScreen() {
     }}
     style={styles.photo}
     resizeMode="cover"
-    onError={(e) => console.log('Photo error:', img.id, e.nativeEvent.error)}/>
+/>
                                     {img.is_primary && (
                                         <View style={styles.primaryBadge}>
                                             <Star color={tc.bgApp} size={12} fill={tc.bgApp} />

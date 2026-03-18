@@ -1,6 +1,6 @@
 // BoxScan — Server Entry Point
-
 import 'dotenv/config';
+import { config } from './config.js';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
@@ -19,10 +19,7 @@ import uploadRoutes from './routes/upload.js';
 const app = new Hono();
 
 // ─── CORS ───────────────────────────────────────────
-const corsOrigins = (process.env.CORS_ORIGINS || '*')
-    .split(',')
-    .map((o) => o.trim())
-    .filter(Boolean);
+const corsOrigins = config.cors.origins;
 
 app.use('/*', cors({
     origin: corsOrigins.length === 1 && corsOrigins[0] === '*'
@@ -55,9 +52,9 @@ app.get('/', (c) => {
 <p class="footer">POST: /api/boxes · /api/analyze · /api/scan · GET: /api/qr/:boxId</p></div></body></html>`);
 });
 
-// ─── Security headers on static/health/root (not on API routes to avoid Hono type issues)
+// ─── Security headers ────────────────────────────────
 app.use('/uploads/*', secureHeaders());
-app.use('/api/health', secureHeaders());
+app.use('/api/*', secureHeaders());
 app.use('/', secureHeaders());
 
 // ─── Health check ───────────────────────────────────
@@ -89,9 +86,21 @@ app.notFound((c) => {
     }, 404);
 });
 
-// ─── Start server ───────────────────────────────────
-const PORT = parseInt(process.env.PORT || '3000', 10);
+// ─── Request access log ──────────────────────────────
+app.use('*', async (c, next) => {
+    const start = Date.now();
+    await next();
+    const ms = Date.now() - start;
+    console.log(JSON.stringify({
+        time: Date.now(),
+        method: c.req.method,
+        path: c.req.path,
+        status: c.res.status,
+        ms,
+    }));
+});
 
+// ─── Start server ───────────────────────────────────
 async function start() {
     // Fail fast if auth is not configured (prevents fail-open deployments)
     assertAuthConfigured();
@@ -99,20 +108,33 @@ async function start() {
     // Run migrations before starting
     await runMigrations();
 
-    serve({
+    const server = serve({
         fetch: app.fetch,
-        port: PORT,
+        port: config.port,
     }, (info) => {
         console.log('');
         console.log('╔══════════════════════════════════════════╗');
-        console.log('║     📦  BoxScan API Server  📦          ║');
+        console.log('║     BoxScan API Server                  ║');
         console.log('╠══════════════════════════════════════════╣');
         console.log(`║  Port:     ${String(info.port).padEnd(29)}║`);
-        console.log(`║  AI:       ${(process.env.AI_PROVIDER || 'mock').padEnd(29)}║`);
-        console.log(`║  Storage:  ${(process.env.STORAGE_PROVIDER || 'local').padEnd(29)}║`);
+        console.log(`║  AI:       ${config.ai.provider.padEnd(29)}║`);
+        console.log(`║  Storage:  ${config.storage.provider.padEnd(29)}║`);
         console.log('╚══════════════════════════════════════════╝');
         console.log('');
     });
+
+    const shutdown = async (signal: string) => {
+        console.log(`[Server] ${signal} received, shutting down...`);
+        server.close(() => {
+            import('./db/index.js').then(({ getDb }) => {
+                getDb().close();
+                process.exit(0);
+            }).catch(() => process.exit(0));
+        });
+    };
+
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
 start().catch((err) => {

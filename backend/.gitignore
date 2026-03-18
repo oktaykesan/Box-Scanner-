@@ -17,8 +17,9 @@ build/
 *.sqlite
 *.sqlite3
 *.db
-boxscan.db
-
+*.db-wal
+*.db-shm
+boxscan.db*
 # Storage / Uploads
 uploads/
 !uploads/.gitkeep

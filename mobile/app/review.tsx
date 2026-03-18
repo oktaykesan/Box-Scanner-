@@ -1,7 +1,5 @@
 // BoxScan — ReviewScreen: Edit & confirm AI results (Lasersan Factory V5)
 
-// BoxScan — ReviewScreen: Edit & confirm AI results (Lasersan Factory V5)
-
 import { useState, useCallback, useEffect } from 'react';
 import * as Haptics from 'expo-haptics';
 import {
@@ -37,11 +35,12 @@ export default function ReviewScreen() {
     const [focusedField, setFocusedField] = useState<string | null>(null);
 
     // Edge case: store boş ama ekrana düşüldüyse (deep link, hot reload vb.)
+    // saving kontrolü: handleSave sırasında clearStore() çağrısı bu guard'ı yanlış tetiklemesin
     useEffect(() => {
-        if (processStatus === 'idle' && !result) {
+        if (processStatus === 'idle' && !result && !saving) {
             router.replace('/');
         }
-    }, [processStatus, result]);
+    }, [processStatus, result, saving]);
 
     // Store'dan state'i doldur
     useFocusEffect(
@@ -51,7 +50,7 @@ export default function ReviewScreen() {
             setItems(result.items.map((i) => ({
                 name: i.name || '',
                 quantity: String(i.quantity ?? 1),
-                category: i.notes || 'uncategorized', // ScannedItem.notes → category olarak kullanılıyor
+                category: i.category || i.notes || 'uncategorized',
             })));
             setTitle(result.suggestedTitle);
             setLocation(result.suggestedLocation);
@@ -63,9 +62,10 @@ export default function ReviewScreen() {
     useEffect(() => {
         if (!result) return;
         if (result.hazardFlag || result.damageFlag) {
-            setTimeout(() => {
+            const timer = setTimeout(() => {
                 Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
             }, 600);
+            return () => clearTimeout(timer);
         }
     }, [result?.hazardFlag, result?.damageFlag]);
 
@@ -113,7 +113,6 @@ export default function ReviewScreen() {
             });
 
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            clearStore(); // Kayıt sonrası store temizlenir
             router.replace({
                 pathname: '/label',
                 params: { boxId: box.id, boxTitle: box.title || '' },
@@ -132,7 +131,7 @@ export default function ReviewScreen() {
         const originalItems = result.items.map((i) => ({
             name: i.name || '',
             quantity: String(i.quantity ?? 1),
-            category: i.notes || 'uncategorized',
+            category: i.category || i.notes || 'uncategorized',
         }));
 
         const hasChanges =

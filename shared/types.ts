@@ -149,8 +149,18 @@ export interface BoxListQuery {
 // ─── Analyze Response ───────────────────────────────
 export interface AnalyzeResponse {
   imageUrl: string;
+  imageUrls?: string[];
   items: DetectedItem[];
   analysisMeta: AnalysisMeta;
+  suggested_title?: string;
+  suggested_location?: string;
+  damage_flag?: boolean;
+  damage_notes?: string | null;
+  hazard_flag?: boolean;
+  hazard_notes?: string | null;
+  summary?: string;
+  confidence?: number;
+  analysisNotes?: string;
 }
 
 // ─── QR Response ────────────────────────────────────

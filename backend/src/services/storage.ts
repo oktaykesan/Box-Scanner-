@@ -3,9 +3,10 @@
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
+import { config } from '../config.js';
 
-const STORAGE_PROVIDER = process.env.STORAGE_PROVIDER || 'local';
-const UPLOAD_DIR = process.env.UPLOAD_DIR || './uploads';
+const STORAGE_PROVIDER = config.storage.provider;
+const UPLOAD_DIR = config.storage.uploadDir;
 
 /**
  * Ensure the upload directory exists.

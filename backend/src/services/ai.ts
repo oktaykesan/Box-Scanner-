@@ -1,16 +1,17 @@
-// BoxScan — AI Analysis Service (Gemini / Local Gateway / Mock) — sql.js version
+// BoxScan — AI Analysis Service (Gemini / Local Gateway / Mock) — better-sqlite3 version
 
 import { v4 as uuidv4 } from 'uuid';
-import { getDb, saveDb } from '../db/index.js';
+import { getDb } from '../db/index.js';
 import type { DetectedItem, AnalysisProvider, AnalysisStatus, AnalysisMeta } from '../shared/types.js';
 import { buildAnalysisPrompt, parseGeminiResponse } from './geminiPrompt.js';
+import { config } from '../config.js';
 
 export interface ImageUpload {
     buffer: Buffer;
     mimeType: string;
 }
 
-const AI_PROVIDER = (process.env.AI_PROVIDER || 'mock') as AnalysisProvider;
+const AI_PROVIDER = config.ai.provider as AnalysisProvider;
 
 export interface AnalysisServiceResult {
     items: DetectedItem[];
@@ -20,10 +21,17 @@ export interface AnalysisServiceResult {
     damage_notes: string | null;
     hazard_flag: boolean;
     hazard_notes: string | null;
-    confidence?: string;
+    confidence?: number;
     analysisNotes?: string;
     summary: string;
     meta: AnalysisMeta;
+}
+
+function confidenceToNumber(c: string | undefined): number {
+    if (c === 'yüksek') return 0.9;
+    if (c === 'orta') return 0.6;
+    if (c === 'düşük') return 0.3;
+    return 0.5;
 }
 
 /**
@@ -48,7 +56,7 @@ export async function analyzeImages(
     let damage_notes: string | null = null;
     let hazard_flag = false;
     let hazard_notes: string | null = null;
-    let confidence: string | undefined = undefined;
+    let confidenceRaw: string | undefined = undefined;
     let analysisNotes: string | undefined = undefined;
     let summary = '';
 
@@ -64,7 +72,7 @@ export async function analyzeImages(
                 damage_notes = r.damage_notes;
                 hazard_flag = r.hazard_flag;
                 hazard_notes = r.hazard_notes;
-                confidence = r.confidence;
+                confidenceRaw = r.confidence;
                 analysisNotes = r.analysisNotes;
                 summary = r.summary;
                 break;
@@ -99,7 +107,7 @@ export async function analyzeImages(
                 break;
             }
         }
-        parsedJson = JSON.stringify({ items, suggested_title, suggested_location, damage_flag, damage_notes, hazard_flag, hazard_notes, confidence, analysisNotes, summary });
+        parsedJson = JSON.stringify({ items, suggested_title, suggested_location, damage_flag, damage_notes, hazard_flag, hazard_notes, confidence: confidenceRaw, analysisNotes, summary });
     } catch (err: any) {
         console.error('[AI] Analiz hatası:', err.message);
         console.error('[AI] Hata detayı:', JSON.stringify(err));
@@ -110,13 +118,11 @@ export async function analyzeImages(
 
     // Log analysis run
     try {
-        const db = await getDb();
-        db.run(
+        const db = getDb();
+        db.prepare(
             `INSERT INTO analysis_runs (id, box_id, image_id, provider, raw_response, parsed_json, status, error_message, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [runId, boxId || null, imageId || null, provider, rawResponse, parsedJson, status, errorMessage, now]
-        );
-        saveDb();
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).run(runId, boxId || null, imageId || null, provider, rawResponse, parsedJson, status, errorMessage, now);
     } catch (logErr) {
         console.error('[AI] Failed to log analysis run:', logErr);
     }
@@ -129,7 +135,7 @@ export async function analyzeImages(
         damage_notes,
         hazard_flag,
         hazard_notes,
-        confidence,
+        confidence: confidenceToNumber(confidenceRaw),
         analysisNotes,
         summary,
         meta: { provider, status, runId },
@@ -155,7 +161,7 @@ async function analyzeWithGemini(
     images: ImageUpload[]
 ): Promise<ExtendedAnalysisResult> {
     console.log(`[Gemini] analyzeWithGemini çağrıldı, ${images.length} fotoğraf yüklendi.`);
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = config.ai.geminiApiKey;
     if (!apiKey) {
         console.error('[Gemini] GEMINI_API_KEY eksik!');
         throw new Error('GEMINI_API_KEY not configured');
@@ -163,43 +169,54 @@ async function analyzeWithGemini(
 
     const { GoogleGenerativeAI } = await import('@google/generative-ai');
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const model = genAI.getGenerativeModel({ model: config.ai.geminiModel });
 
+    console.log('[Gemini] API isteği başlıyor...');
+    const promptParts = buildAnalysisPrompt(images.map(img => ({
+        data: img.buffer.toString('base64'),
+        mimeType: img.mimeType
+    })));
+
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => controller.abort(), 30_000);
+
+    let text: string;
     try {
-        console.log('[Gemini] API isteği başlıyor...');
-        const promptParts = buildAnalysisPrompt(images.map(img => ({
-            data: img.buffer.toString('base64'),
-            mimeType: img.mimeType
-        })));
-
-        const result = await model.generateContent(promptParts);
-        const text = result.response.text();
-        console.log('[Gemini] Ham yanıt:', text.slice(0, 200));
-
-        const parsed = parseGeminiResponse(text);
-
-        return {
-            items: parsed.items.map(i => ({
-                name: i.name,
-                quantity: i.quantity,
-                category: 'uncategorized',
-                condition: i.condition,
-            })),
-            suggested_title: parsed.suggestedLabel,
-            suggested_location: parsed.suggestedShelf,
-            damage_flag: parsed.hasDamagedItems,
-            damage_notes: parsed.damageNotes || null,
-            hazard_flag: parsed.hasDangerousItems,
-            hazard_notes: parsed.dangerNotes || null,
-            confidence: parsed.confidence,
-            analysisNotes: parsed.analysisNotes || '',
-            summary: parsed.analysisNotes || '',
-            rawResponse: text,
-        };
-    } catch (geminiErr: any) {
-        console.error('[Gemini] API hatası:', geminiErr.message);
-        throw geminiErr;
+        // Gemini SDK signal desteği garantili değil — Promise.race ile timeout uygula
+        const apiCall = model.generateContent(promptParts);
+        const timeoutPromise = new Promise<never>((_, reject) =>
+            controller.signal.addEventListener('abort', () =>
+                reject(new Error('Gemini API request timed out after 30s'))
+            )
+        );
+        const result = await Promise.race([apiCall, timeoutPromise]);
+        text = result.response.text();
+    } finally {
+        clearTimeout(timeoutHandle);
     }
+
+    console.log('[Gemini] Ham yanıt:', text.slice(0, 200));
+
+    const parsed = parseGeminiResponse(text);
+
+    return {
+        items: parsed.items.map(i => ({
+            name: i.name,
+            quantity: i.quantity,
+            category: 'uncategorized',
+            condition: i.condition,
+        })),
+        suggested_title: parsed.suggestedLabel,
+        suggested_location: parsed.suggestedShelf,
+        damage_flag: parsed.hasDamagedItems,
+        damage_notes: parsed.damageNotes || null,
+        hazard_flag: parsed.hasDangerousItems,
+        hazard_notes: parsed.dangerNotes || null,
+        confidence: parsed.confidence,
+        analysisNotes: parsed.analysisNotes || '',
+        summary: parsed.analysisNotes || '',
+        rawResponse: text,
+    };
 }
 
 // ─── Local AI Gateway Provider ──────────────────────
@@ -207,7 +224,7 @@ async function analyzeWithLocalGateway(
     imageBuffer: Buffer,
     mimeType: string
 ): Promise<ExtendedAnalysisResult> {
-    const gatewayUrl = process.env.AI_GATEWAY_URL;
+    const gatewayUrl = config.ai.gatewayUrl;
     if (!gatewayUrl) throw new Error('AI_GATEWAY_URL not configured');
 
     const response = await fetch(gatewayUrl, {
@@ -275,4 +292,57 @@ function parseExtendedAIResponse(text: string): ExtendedAnalysisResult {
     } catch (err: any) {
         throw new Error(`Failed to parse AI response: ${err.message}`);
     }
+}
+
+// ─── Smart Search ────────────────────────────────────
+/**
+ * Gemini kullanarak kutu listesi içinde semantik arama yapar.
+ * Gemini hata verirse boş dizi döndürmek yerine hata fırlatır —
+ * çağıran katman hata yönetiminden sorumludur.
+ */
+export async function smartSearch(query: string, boxes: any[]): Promise<any[]> {
+    const apiKey = config.ai.geminiApiKey;
+    if (!apiKey) {
+        throw new Error('GEMINI_API_KEY not configured');
+    }
+
+    const { GoogleGenerativeAI } = await import('@google/generative-ai');
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: config.ai.geminiModel });
+
+    const prompt = `You are a warehouse search assistant. Given a search query and a list of boxes with their contents, return the IDs of boxes that match the query. Respond with a JSON array of matching box IDs only, like: ["id1","id2"]. If no boxes match, return [].
+
+Search query: "${query}"
+
+Boxes:
+${JSON.stringify(boxes, null, 2)}`;
+
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => controller.abort(), 30_000);
+
+    let text: string;
+    try {
+        const apiCall = model.generateContent(prompt);
+        const timeoutPromise = new Promise<never>((_, reject) =>
+            controller.signal.addEventListener('abort', () =>
+                reject(new Error('Gemini smartSearch timed out after 30s'))
+            )
+        );
+        const result = await Promise.race([apiCall, timeoutPromise]);
+        text = result.response.text();
+    } finally {
+        clearTimeout(timeoutHandle);
+    }
+
+    let jsonStr = text.trim();
+    const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (jsonMatch) jsonStr = jsonMatch[1].trim();
+
+    const matchedIds: string[] = JSON.parse(jsonStr);
+    if (!Array.isArray(matchedIds)) {
+        throw new Error('smartSearch: Gemini returned non-array response');
+    }
+
+    const idSet = new Set(matchedIds);
+    return boxes.filter((box: any) => idSet.has(box.id));
 }
