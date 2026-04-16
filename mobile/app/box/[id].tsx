@@ -1,15 +1,16 @@
 // BoxScan — BoxDetailScreen: Full box info + edit/delete (Lasersan Factory V5)
 
-import { useState, useEffect, useCallback, useMemo, ReactNode } from 'react';
+import { useState, useCallback, useMemo, ReactNode } from 'react';
 import {
     View, Text, ScrollView, TouchableOpacity, StyleSheet,
-    ActivityIndicator, Alert, Image,
+    ActivityIndicator, Alert, Image, Modal, Dimensions,
+    StatusBar, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import {
     SearchX, MapPin, StickyNote, Calendar, Clock, ScanLine,
-    Package, ImageIcon, Star, Trash2, Tag, ChevronRight
+    Package, Star, Trash2, Tag, ChevronRight, X, ChevronLeft,
 } from 'lucide-react-native';
 import { Colors, Spacing, Typography, BorderRadius, Shadow } from '../../constants/theme';
 import { Config } from '../../constants/config';
@@ -25,6 +26,13 @@ export default function BoxDetailScreen() {
     const [box, setBox] = useState<Box | null>(null);
     const [loading, setLoading] = useState(true);
     const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+    const [lightboxVisible, setLightboxVisible] = useState(false);
+    const [lightboxIndex, setLightboxIndex] = useState(0);
+
+    const openLightbox = (index: number) => {
+        setLightboxIndex(index);
+        setLightboxVisible(true);
+    };
 
     useFocusEffect(
         useCallback(() => {
@@ -171,6 +179,12 @@ export default function BoxDetailScreen() {
             width: 24, height: 24, justifyContent: 'center', alignItems: 'center',
             ...Shadow.elevationBase,
         },
+        zoomHint: {
+            position: 'absolute', bottom: Spacing.space2, right: Spacing.space2,
+            backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: 8,
+            paddingHorizontal: 5, paddingVertical: 2,
+        },
+        zoomHintText: { fontSize: 11 },
 
         // Actions
         actions: { gap: Spacing.space3, marginTop: Spacing.space6 },
@@ -277,25 +291,48 @@ export default function BoxDetailScreen() {
                         </View>
                         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: Spacing.space3 }}>
                             {box.images.map((img: any, index: number) => (
-                                <View key={img.id || index} style={styles.photoCard}>
-                                <Image
-    source={{
-        uri: img.image_url.startsWith('http')
-            ? img.image_url
-            : `${Config.API_BASE_URL}${img.image_url}`,
-    }}
-    style={styles.photo}
-    resizeMode="cover"
-/>
+                                <TouchableOpacity
+                                    key={img.id || index}
+                                    style={styles.photoCard}
+                                    onPress={() => openLightbox(index)}
+                                    activeOpacity={0.85}
+                                >
+                                    <Image
+                                        source={{
+                                            uri: img.image_url.startsWith('http')
+                                                ? img.image_url
+                                                : `${Config.API_BASE_URL}${img.image_url}`,
+                                        }}
+                                        style={styles.photo}
+                                        resizeMode="cover"
+                                    />
                                     {img.is_primary && (
                                         <View style={styles.primaryBadge}>
                                             <Star color={tc.bgApp} size={12} fill={tc.bgApp} />
                                         </View>
                                     )}
-                                </View>
+                                    {/* Zoom hint overlay */}
+                                    <View style={styles.zoomHint}>
+                                        <Text style={styles.zoomHintText}>🔍</Text>
+                                    </View>
+                                </TouchableOpacity>
                             ))}
                         </ScrollView>
                     </View>
+                )}
+
+                {/* Lightbox Modal */}
+                {box.images.length > 0 && (
+                    <PhotoLightbox
+                        visible={lightboxVisible}
+                        images={box.images.map((img: any) =>
+                            img.image_url.startsWith('http')
+                                ? img.image_url
+                                : `${Config.API_BASE_URL}${img.image_url}`
+                        )}
+                        initialIndex={lightboxIndex}
+                        onClose={() => setLightboxVisible(false)}
+                    />
                 )}
 
                 {/* Actions */}
@@ -330,5 +367,135 @@ function InfoItem({ icon, label, value, colors, styles }: { icon: ReactNode; lab
                 <Text style={styles.infoValue}>{value}</Text>
             </View>
         </View>
+    );
+}
+
+// ── Lightbox ──────────────────────────────────────────────────────────────────
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
+
+function PhotoLightbox({
+    visible,
+    images,
+    initialIndex,
+    onClose,
+}: {
+    visible: boolean;
+    images: string[];
+    initialIndex: number;
+    onClose: () => void;
+}) {
+    const [currentIndex, setCurrentIndex] = useState(initialIndex);
+
+    // Sync index when opened with a different image
+    useMemo(() => { setCurrentIndex(initialIndex); }, [initialIndex]);
+
+    const prev = () => setCurrentIndex((i) => Math.max(0, i - 1));
+    const next = () => setCurrentIndex((i) => Math.min(images.length - 1, i + 1));
+
+    return (
+        <Modal
+            visible={visible}
+            transparent={false}
+            animationType="fade"
+            onRequestClose={onClose}
+            statusBarTranslucent
+        >
+            <StatusBar hidden />
+            {/* Full-screen black container */}
+            <View style={{ flex: 1, backgroundColor: '#000' }}>
+
+                {/* Zoom-capable ScrollView fills entire screen */}
+                <ScrollView
+                    style={{ position: 'absolute', top: 0, left: 0, width: SCREEN_W, height: SCREEN_H }}
+                    contentContainerStyle={{ width: SCREEN_W, height: SCREEN_H, justifyContent: 'center', alignItems: 'center' }}
+                    maximumZoomScale={4}
+                    minimumZoomScale={1}
+                    showsHorizontalScrollIndicator={false}
+                    showsVerticalScrollIndicator={false}
+                    centerContent
+                    bouncesZoom
+                >
+                    <Image
+                        source={{ uri: images[currentIndex] }}
+                        style={{ width: SCREEN_W, height: SCREEN_H }}
+                        resizeMode="contain"
+                    />
+                </ScrollView>
+
+                {/* ── Overlays (absolute, above ScrollView) ── */}
+
+                {/* Close button */}
+                <TouchableOpacity
+                    onPress={onClose}
+                    hitSlop={{ top: 16, left: 16, bottom: 16, right: 16 }}
+                    style={{
+                        position: 'absolute',
+                        top: Platform.OS === 'ios' ? 56 : 36,
+                        right: 20,
+                        zIndex: 30,
+                        backgroundColor: 'rgba(0,0,0,0.6)',
+                        borderRadius: 24,
+                        padding: 8,
+                    }}
+                >
+                    <X color="#fff" size={26} strokeWidth={2.5} />
+                </TouchableOpacity>
+
+                {/* Counter badge */}
+                {images.length > 1 && (
+                    <View style={{
+                        position: 'absolute',
+                        top: Platform.OS === 'ios' ? 60 : 40,
+                        left: 0,
+                        right: 0,
+                        alignItems: 'center',
+                        zIndex: 30,
+                        pointerEvents: 'none',
+                    }}>
+                        <View style={{ backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 4 }}>
+                            <Text style={{ color: '#fff', fontSize: 13, fontWeight: '600', letterSpacing: 1 }}>
+                                {currentIndex + 1} / {images.length}
+                            </Text>
+                        </View>
+                    </View>
+                )}
+
+                {/* Prev button */}
+                {images.length > 1 && currentIndex > 0 && (
+                    <TouchableOpacity
+                        onPress={prev}
+                        style={{
+                            position: 'absolute',
+                            left: 16,
+                            top: SCREEN_H / 2 - 24,
+                            zIndex: 30,
+                            backgroundColor: 'rgba(0,0,0,0.55)',
+                            borderRadius: 28,
+                            padding: 10,
+                        }}
+                    >
+                        <ChevronLeft color="#fff" size={28} strokeWidth={2} />
+                    </TouchableOpacity>
+                )}
+
+                {/* Next button */}
+                {images.length > 1 && currentIndex < images.length - 1 && (
+                    <TouchableOpacity
+                        onPress={next}
+                        style={{
+                            position: 'absolute',
+                            right: 16,
+                            top: SCREEN_H / 2 - 24,
+                            zIndex: 30,
+                            backgroundColor: 'rgba(0,0,0,0.55)',
+                            borderRadius: 28,
+                            padding: 10,
+                        }}
+                    >
+                        <ChevronRight color="#fff" size={28} strokeWidth={2} />
+                    </TouchableOpacity>
+                )}
+            </View>
+        </Modal>
     );
 }

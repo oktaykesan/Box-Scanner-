@@ -43,8 +43,11 @@ export const Config = {
     /** Enable mock mode (no backend required) */
     MOCK_MODE: false,
 
-    /** API request timeout in ms */
-    REQUEST_TIMEOUT: 30000,
+    /** API request timeout in ms (normal endpoints) */
+    REQUEST_TIMEOUT: 60000,
+
+    /** Timeout for long-running AI / upload operations in ms */
+    AI_REQUEST_TIMEOUT: 120000,
 
     /** Deep link scheme */
     DEEP_LINK_SCHEME: 'boxscan',

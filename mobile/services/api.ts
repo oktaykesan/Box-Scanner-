@@ -1,4 +1,4 @@
-// BoxScan — API Client (fetch wrapper, timeout 30s, multipart helper)
+// BoxScan — API Client (fetch wrapper, timeout 60s normal / 120s AI, multipart helper)
 
 import { Config } from '../constants/config';
 
@@ -180,7 +180,7 @@ export async function deleteBox(id: string): Promise<void> {
 /** Analyze images (multipart upload) — no retry: long-running AI operation */
 export async function analyzeImage(imageUris: string[], externalSignal?: AbortSignal): Promise<AnalyzeResult> {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), TIMEOUT);
+    const timeoutId = setTimeout(() => controller.abort(), Config.AI_REQUEST_TIMEOUT);
     if (externalSignal) {
         externalSignal.addEventListener('abort', () => controller.abort());
     }
@@ -223,7 +223,7 @@ export async function analyzeImage(imageUris: string[], externalSignal?: AbortSi
 /** Upload images only (no AI) — no retry: long-running upload operation */
 export async function uploadImages(imageUris: string[], externalSignal?: AbortSignal): Promise<string[]> {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), TIMEOUT);
+    const timeoutId = setTimeout(() => controller.abort(), Config.AI_REQUEST_TIMEOUT);
     if (externalSignal) {
         externalSignal.addEventListener('abort', () => controller.abort());
     }

@@ -27,6 +27,9 @@ yarn-error.log*
 .env.test.local
 .env.production.local
 
+# Docker overrides (local IP overrides, etc.)
+docker-compose.override.yml
+
 # Local tools and logs
 .claude/
 git_status.txt
@@ -35,3 +38,12 @@ git_log.txt
 help.txt
 ts_errors.txt
 *.txt
+
+# SQLite DB files (runtime data — not committed)
+backend/boxscan.db
+backend/boxscan.db-shm
+backend/boxscan.db-wal
+backend/boxscan.db-journal
+
+# Uploaded user files (runtime data)
+backend/uploads/

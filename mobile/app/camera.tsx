@@ -458,8 +458,9 @@ const scanLogoOutlineStyle = useAnimatedStyle(() => {
                     {/* Dimmed background */}
                     <View style={styles.processingDim} />
 
-                    {/* DataRain matrix background */}
-                    <DataRain opacity={0.85} active={processing} />
+                    {/* DataRain matrix background — only mounted when processing to free Android memory */}
+                    {processing && <DataRain opacity={0.85} active={processing} />}
+
 
                     {/* Ripple rings + label */}
                     <View style={styles.rippleContainer}>
